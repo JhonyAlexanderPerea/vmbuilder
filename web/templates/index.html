@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VM Platform — Universidad del Quindío</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; }
+    .badge-stopped  { background:#1e3a5f; color:#60a5fa; }
+    .badge-running  { background:#14532d; color:#4ade80; }
+    .badge-starting { background:#422006; color:#fb923c; }
+    .badge-error    { background:#450a0a; color:#f87171; }
+    .btn { padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: opacity .15s; }
+    .btn:disabled { opacity: .35; cursor: not-allowed; }
+    .btn:not(:disabled):hover { opacity: .85; }
+    .btn-blue   { background: #2563eb; color: white; }
+    .btn-green  { background: #16a34a; color: white; }
+    .btn-red    { background: #dc2626; color: white; }
+    .btn-gray   { background: #475569; color: white; }
+    .btn-amber  { background: #d97706; color: white; }
+    input, select, textarea {
+      background: #0f172a; border: 1px solid #334155; border-radius: 8px;
+      color: #e2e8f0; padding: 8px 12px; width: 100%; font-size: 14px;
+    }
+    input:focus, select:focus { outline: 2px solid #2563eb; border-color: transparent; }
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: flex; align-items: center; justify-content: center; z-index: 50; }
+    .modal { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 28px; width: 420px; max-width: 95vw; }
+    .section-title { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #64748b; margin-bottom: 12px; }
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.3); border-top-color: white; border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 10px; font-size: 14px; z-index: 100; animation: fadeIn .2s ease; }
+    .toast-ok  { background: #14532d; color: #4ade80; border: 1px solid #166534; }
+    .toast-err { background: #450a0a; color: #f87171; border: 1px solid #7f1d1d; }
+    @keyframes fadeIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+  </style>
+</head>
+<body class="min-h-screen p-6">
+
+<!-- Header -->
+<header class="flex items-center justify-between mb-8">
+  <div>
+    <h1 class="text-2xl font-bold text-white">VM Platform</h1>
+    <p class="text-slate-400 text-sm mt-1">Gestión de Máquinas Virtuales — Universidad del Quindío</p>
+  </div>
+  <button onclick="loadDashboard()" class="btn btn-gray flex items-center gap-2">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+    Actualizar
+  </button>
+</header>
+
+<!-- Dashboard grid -->
+<div class="grid grid-cols-1 gap-6">
+
+  <!-- ── Base VMs ─────────────────────────────────── -->
+  <section class="card p-5">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <p class="section-title">Máquinas virtuales base</p>
+        <h2 class="text-white font-semibold">VMs Base</h2>
+      </div>
+      <button onclick="openModal('modal-add-base-vm')" class="btn btn-blue">+ Agregar VM base</button>
+    </div>
+    <div id="base-vms-list" class="grid gap-3">
+      <div class="text-slate-500 text-sm">Cargando...</div>
+    </div>
+  </section>
+
+  <!-- ── Discos ──────────────────────────────────── -->
+  <section class="card p-5">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <p class="section-title">Discos multiconexión</p>
+        <h2 class="text-white font-semibold">Discos listos para usar</h2>
+      </div>
+    </div>
+    <div id="disks-list" class="grid gap-3">
+      <div class="text-slate-500 text-sm">Cargando...</div>
+    </div>
+  </section>
+
+  <!-- ── User VMs ────────────────────────────────── -->
+  <section class="card p-5">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <p class="section-title">VMs de usuario</p>
+        <h2 class="text-white font-semibold">Instancias activas</h2>
+      </div>
+    </div>
+    <div id="user-vms-list" class="grid gap-3">
+      <div class="text-slate-500 text-sm">Cargando...</div>
+    </div>
+  </section>
+
+</div>
+
+<!-- ── Modal: Agregar VM base ───────────────────────────────────── -->
+<div id="modal-add-base-vm" class="modal-bg hidden">
+  <div class="modal">
+    <h3 class="text-white font-semibold mb-4">Agregar VM base</h3>
+    <div class="space-y-3">
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">Nombre *</label>
+        <input id="bvm-name" type="text" placeholder="ej. debian-12-base">
+      </div>
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">Descripción</label>
+        <textarea id="bvm-desc" rows="2" placeholder="Descripción opcional"></textarea>
+      </div>
+    </div>
+    <div class="flex gap-2 mt-5 justify-end">
+      <button onclick="closeModal('modal-add-base-vm')" class="btn btn-gray">Cancelar</button>
+      <button onclick="createBaseVM()" class="btn btn-blue">Crear</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Crear disco ────────────────────────────────────────── -->
+<div id="modal-add-disk" class="modal-bg hidden">
+  <div class="modal">
+    <h3 class="text-white font-semibold mb-4">Crear disco multiconexión</h3>
+    <input type="hidden" id="disk-vm-id">
+    <div class="space-y-3">
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">Nombre del disco *</label>
+        <input id="disk-name" type="text" placeholder="ej. disco-compartido-01">
+      </div>
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">Tamaño (MB)</label>
+        <input id="disk-size" type="number" value="20480" min="1024">
+      </div>
+    </div>
+    <div class="flex gap-2 mt-5 justify-end">
+      <button onclick="closeModal('modal-add-disk')" class="btn btn-gray">Cancelar</button>
+      <button onclick="createDisk()" class="btn btn-green">Crear disco</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Crear VM usuario ───────────────────────────────────── -->
+<div id="modal-add-user-vm" class="modal-bg hidden">
+  <div class="modal">
+    <h3 class="text-white font-semibold mb-4">Crear VM de usuario</h3>
+    <input type="hidden" id="uvm-disk-id">
+    <div class="space-y-3">
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">Nombre *</label>
+        <input id="uvm-name" type="text" placeholder="ej. vm-estudiante-01">
+      </div>
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">Descripción</label>
+        <input id="uvm-desc" type="text" placeholder="Descripción opcional">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-slate-400 text-xs mb-1 block">RAM (MB)</label>
+          <input id="uvm-ram" type="number" value="1024" min="512">
+        </div>
+        <div>
+          <label class="text-slate-400 text-xs mb-1 block">CPUs</label>
+          <input id="uvm-cpus" type="number" value="1" min="1" max="4">
+        </div>
+      </div>
+    </div>
+    <div class="flex gap-2 mt-5 justify-end">
+      <button onclick="closeModal('modal-add-user-vm')" class="btn btn-gray">Cancelar</button>
+      <button onclick="createUserVM()" class="btn btn-blue">Crear VM</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Crear usuario SO ──────────────────────────────────── -->
+<div id="modal-create-user" class="modal-bg hidden">
+  <div class="modal">
+    <h3 class="text-white font-semibold mb-4">Crear usuario en VM</h3>
+    <input type="hidden" id="cu-vm-id">
+    <div class="space-y-3">
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">Nombre de usuario *</label>
+        <input id="cu-username" type="text" placeholder="ej. estudiante01">
+      </div>
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">IP o host de la VM *</label>
+        <input id="cu-host" type="text" placeholder="ej. 127.0.0.1">
+      </div>
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">Puerto SSH</label>
+        <input id="cu-port" type="number" value="22">
+      </div>
+    </div>
+    <div class="flex gap-2 mt-5 justify-end">
+      <button onclick="closeModal('modal-create-user')" class="btn btn-gray">Cancelar</button>
+      <button onclick="createUserAccount()" class="btn btn-green">Crear usuario</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/api'
+
+// ─── Toast ────────────────────────────────────────────────────────
+function toast(msg, ok = true) {
+  const el = document.createElement('div')
+  el.className = `toast ${ok ? 'toast-ok' : 'toast-err'}`
+  el.textContent = msg
+  document.body.appendChild(el)
+  setTimeout(() => el.remove(), 3500)
+}
+
+// ─── Modals ───────────────────────────────────────────────────────
+function openModal(id) { document.getElementById(id).classList.remove('hidden') }
+function closeModal(id) { document.getElementById(id).classList.add('hidden') }
+
+// Cerrar modal al hacer click en el fondo
+document.querySelectorAll('.modal-bg').forEach(bg => {
+  bg.addEventListener('click', e => { if (e.target === bg) bg.classList.add('hidden') })
+})
+
+// ─── API helpers ──────────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } }
+  if (body) opts.body = JSON.stringify(body)
+  const res = await fetch(API + path, opts)
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || 'Error en la petición')
+  return data
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────
+async function loadDashboard() {
+  try {
+    const { base_vms, disks, user_vms } = await api('GET', '/dashboard')
+    renderBaseVMs(base_vms || [])
+    renderDisks(disks || [])
+    renderUserVMs(user_vms || [])
+  } catch (e) {
+    toast(e.message, false)
+  }
+}
+
+// ─── Base VMs ─────────────────────────────────────────────────────
+function stateBadge(state) {
+  const cls = { stopped:'badge-stopped', running:'badge-running', starting:'badge-starting', error:'badge-error' }
+  const label = { stopped:'Detenida', running:'Ejecutando', starting:'Iniciando', error:'Error' }
+  return `<span class="px-2 py-0.5 rounded-full text-xs font-medium ${cls[state]||'badge-stopped'}">${label[state]||state}</span>`
+}
+
+function renderBaseVMs(vms) {
+  const el = document.getElementById('base-vms-list')
+  if (!vms.length) { el.innerHTML = '<div class="text-slate-500 text-sm">No hay VMs base. Agrega una.</div>'; return }
+  el.innerHTML = vms.map(vm => `
+    <div class="card p-4 flex flex-col gap-3">
+      <div class="flex items-start justify-between">
+        <div>
+          <p class="text-white font-medium">${vm.name}</p>
+          <p class="text-slate-400 text-sm">${vm.description || 'Sin descripción'}</p>
+        </div>
+        ${stateBadge(vm.state)}
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button
+          onclick="createRootKeys(${vm.id})"
+          ${vm.has_root_keys ? 'disabled' : ''}
+          class="btn btn-blue"
+          title="${vm.has_root_keys ? 'Llaves ya generadas' : 'Crear llaves de root RSA'}">
+          🔑 ${vm.has_root_keys ? 'Llaves creadas' : 'Crear llaves root'}
+        </button>
+        <a href="${API}/base-vms/${vm.id}/root-keys/download"
+           class="btn btn-gray ${!vm.has_root_keys ? 'opacity-40 pointer-events-none' : ''}"
+           download>
+          ⬇ Descargar llave root
+        </a>
+        <button
+          onclick="openCreateDiskModal(${vm.id})"
+          ${!vm.has_root_keys ? 'disabled' : ''}
+          class="btn btn-green"
+          title="${!vm.has_root_keys ? 'Requiere llaves de root' : 'Crear disco multiconexión'}">
+          💾 Crear disco
+        </button>
+      </div>
+    </div>
+  `).join('')
+}
+
+// ─── Disks ────────────────────────────────────────────────────────
+function renderDisks(disks) {
+  const el = document.getElementById('disks-list')
+  if (!disks.length) { el.innerHTML = '<div class="text-slate-500 text-sm">No hay discos creados aún.</div>'; return }
+  el.innerHTML = disks.map(d => `
+    <div class="card p-4 flex flex-col gap-3">
+      <div class="flex items-start justify-between">
+        <div>
+          <p class="text-white font-medium">${d.name}</p>
+          <p class="text-slate-400 text-xs font-mono truncate max-w-xs">${d.file_path}</p>
+        </div>
+        <span class="px-2 py-0.5 rounded-full text-xs font-medium badge-stopped">${d.state}</span>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button onclick="openCreateUserVMModal(${d.id})" class="btn btn-blue">+ Crear VM usuario</button>
+        <button onclick="deleteDisk(${d.id})" class="btn btn-red">🗑 Eliminar disco</button>
+      </div>
+    </div>
+  `).join('')
+}
+
+// ─── User VMs ─────────────────────────────────────────────────────
+function renderUserVMs(vms) {
+  const el = document.getElementById('user-vms-list')
+  if (!vms.length) { el.innerHTML = '<div class="text-slate-500 text-sm">No hay VMs de usuario creadas.</div>'; return }
+  el.innerHTML = vms.map(vm => `
+    <div class="card p-4 flex flex-col gap-3">
+      <div class="flex items-start justify-between">
+        <div>
+          <p class="text-white font-medium">${vm.name}</p>
+          <p class="text-slate-400 text-sm">${vm.description || 'Sin descripción'}</p>
+          ${vm.username ? `<p class="text-slate-500 text-xs mt-1">Usuario: <span class="font-mono text-slate-300">${vm.username}</span></p>` : ''}
+        </div>
+        ${stateBadge(vm.state)}
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button
+          onclick="openCreateUserModal(${vm.id})"
+          ${vm.has_user_keys ? 'disabled' : ''}
+          class="btn btn-green">
+          👤 ${vm.has_user_keys ? 'Usuario creado' : 'Crear usuario'}
+        </button>
+        <a href="${API}/user-vms/${vm.id}/user-keys/download"
+           class="btn btn-gray ${!vm.has_user_keys ? 'opacity-40 pointer-events-none' : ''}"
+           download>
+          ⬇ Descargar llaves usuario
+        </a>
+        <button onclick="deleteUserVM(${vm.id})" class="btn btn-red">🗑 Eliminar VM</button>
+      </div>
+    </div>
+  `).join('')
+}
+
+// ─── Actions ──────────────────────────────────────────────────────
+
+async function createBaseVM() {
+  const name = document.getElementById('bvm-name').value.trim()
+  const description = document.getElementById('bvm-desc').value.trim()
+  if (!name) { toast('El nombre es obligatorio', false); return }
+  try {
+    await api('POST', '/base-vms', { name, description })
+    closeModal('modal-add-base-vm')
+    toast('VM base creada correctamente')
+    loadDashboard()
+  } catch (e) { toast(e.message, false) }
+}
+
+async function createRootKeys(vmId) {
+  try {
+    const res = await api('POST', `/base-vms/${vmId}/root-keys`)
+    toast('Llaves RSA de root generadas correctamente')
+    loadDashboard()
+  } catch (e) { toast(e.message, false) }
+}
+
+function openCreateDiskModal(vmId) {
+  document.getElementById('disk-vm-id').value = vmId
+  document.getElementById('disk-name').value = ''
+  openModal('modal-add-disk')
+}
+
+async function createDisk() {
+  const vmId = document.getElementById('disk-vm-id').value
+  const name = document.getElementById('disk-name').value.trim()
+  const size_mb = parseInt(document.getElementById('disk-size').value) || 20480
+  if (!name) { toast('El nombre es obligatorio', false); return }
+  try {
+    await api('POST', `/base-vms/${vmId}/disks`, { name, size_mb })
+    closeModal('modal-add-disk')
+    toast('Disco multiconexión creado')
+    loadDashboard()
+  } catch (e) { toast(e.message, false) }
+}
+
+async function deleteDisk(id) {
+  if (!confirm('¿Eliminar este disco? Esta acción no se puede deshacer.')) return
+  try {
+    await api('DELETE', `/disks/${id}`)
+    toast('Disco eliminado')
+    loadDashboard()
+  } catch (e) { toast(e.message, false) }
+}
+
+function openCreateUserVMModal(diskId) {
+  document.getElementById('uvm-disk-id').value = diskId
+  document.getElementById('uvm-name').value = ''
+  document.getElementById('uvm-desc').value = ''
+  openModal('modal-add-user-vm')
+}
+
+async function createUserVM() {
+  const diskId = document.getElementById('uvm-disk-id').value
+  const name = document.getElementById('uvm-name').value.trim()
+  const description = document.getElementById('uvm-desc').value.trim()
+  const ram_mb = parseInt(document.getElementById('uvm-ram').value) || 1024
+  const cpus = parseInt(document.getElementById('uvm-cpus').value) || 1
+  if (!name) { toast('El nombre es obligatorio', false); return }
+  try {
+    await api('POST', `/disks/${diskId}/user-vms`, { name, description, ram_mb, cpus })
+    closeModal('modal-add-user-vm')
+    toast('VM de usuario creada')
+    loadDashboard()
+  } catch (e) { toast(e.message, false) }
+}
+
+function openCreateUserModal(vmId) {
+  document.getElementById('cu-vm-id').value = vmId
+  document.getElementById('cu-username').value = ''
+  document.getElementById('cu-host').value = ''
+  openModal('modal-create-user')
+}
+
+async function createUserAccount() {
+  const vmId = document.getElementById('cu-vm-id').value
+  const username = document.getElementById('cu-username').value.trim()
+  const vm_host = document.getElementById('cu-host').value.trim()
+  const vm_port = parseInt(document.getElementById('cu-port').value) || 22
+  if (!username || !vm_host) { toast('Username y host son obligatorios', false); return }
+  try {
+    await api('POST', `/user-vms/${vmId}/user-account`, { username, vm_host, vm_port })
+    closeModal('modal-create-user')
+    toast(`Usuario '${username}' creado correctamente`)
+    loadDashboard()
+  } catch (e) { toast(e.message, false) }
+}
+
+async function deleteUserVM(id) {
+  if (!confirm('¿Eliminar esta VM de usuario?')) return
+  try {
+    await api('DELETE', `/user-vms/${id}`)
+    toast('VM eliminada')
+    loadDashboard()
+  } catch (e) { toast(e.message, false) }
+}
+
+// ─── Init ─────────────────────────────────────────────────────────
+loadDashboard()
+</script>
+</body>
+</html>
