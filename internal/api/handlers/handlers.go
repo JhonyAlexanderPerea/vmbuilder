@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -251,8 +253,20 @@ func (h *Handler) CreateDisk(w http.ResponseWriter, r *http.Request) {
 		req.SizeMB = 20480 // 20 GB por defecto
 	}
 
-	// Ruta en la carpeta predeterminada de VirtualBox
-	filePath := fmt.Sprintf("~/VirtualBox VMs/%s/%s.vdi", vm.Name, req.Name)
+	// Ruta en la carpeta predeterminada de VirtualBox (expandiendo la tilde manualmente para Windows)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		respondErr(w, 500, "No se pudo determinar el directorio del usuario: "+err.Error())
+		return
+	}
+
+	vmDir := filepath.Join(home, "VirtualBox VMs", vm.Name)
+	if err := os.MkdirAll(vmDir, 0755); err != nil {
+		respondErr(w, 500, "Error creando directorio de la VM: "+err.Error())
+		return
+	}
+
+	filePath := filepath.Join(vmDir, req.Name+".vdi")
 
 	if err := h.VBox.CreateMultiattachDisk(filePath, req.SizeMB); err != nil {
 		respondErr(w, 500, "Error creando disco en VirtualBox: "+err.Error())
