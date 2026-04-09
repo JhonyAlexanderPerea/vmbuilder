@@ -1,4 +1,4 @@
-# VM Platform — Plataforma Web de Gestión de Máquinas Virtuales
+# VM Builder — Plataforma Web de Gestión de Máquinas Virtuales
 
 ## Stack tecnológico
 - **Backend**: Go 1.22+ (net/http, chi router)
