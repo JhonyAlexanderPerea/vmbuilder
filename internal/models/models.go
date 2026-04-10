@@ -30,6 +30,7 @@ type BaseVM struct {
 	Description string    `json:"description"`
 	State       VMState   `json:"state"`
 	HasRootKeys bool      `json:"has_root_keys"`   // llaves RSA de root generadas
+	RootPubKey  string    `json:"root_pub_key"`    // clave pública para copiar a la VM
 	VBoxUUID    string    `json:"vbox_uuid"`        // UUID asignado por VirtualBox
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`

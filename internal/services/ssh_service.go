@@ -97,6 +97,37 @@ func (s *SSHService) RunCommand(host string, port int, user string, privKeyPEM [
 	return out.String(), nil
 }
 
+// InstallPublicKeyWithPassword instala la clave pública usando contraseña (útil para la primera vez).
+func (s *SSHService) InstallPublicKeyWithPassword(host string, port int, user, password, pubKey string) error {
+	cfg := &ssh.ClientConfig{
+		User:            user,
+		Auth:            []ssh.AuthMethod{ssh.Password(password)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+
+	addr := fmt.Sprintf("%s:%d", host, port)
+	client, err := ssh.Dial("tcp", addr, cfg)
+	if err != nil {
+		return fmt.Errorf("error de conexión (¿está habilitado el login por password en la VM?): %w", err)
+	}
+	defer client.Close()
+
+	session, err := client.NewSession()
+	if err != nil {
+		return err
+	}
+	defer session.Close()
+
+	// Comandos para asegurar .ssh e inyectar la llave
+	cmd := fmt.Sprintf(`mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '%s' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`, pubKey)
+	
+	if err := session.Run(cmd); err != nil {
+		return fmt.Errorf("error ejecutando comandos en la VM: %w", err)
+	}
+	return nil
+}
+
 // ─── Root key installation ────────────────────────────────────────────────────
 
 // InstallRootPublicKey instala la clave pública en /root/.ssh/authorized_keys

@@ -46,6 +46,7 @@ func NewRouter(db *repository.DB) http.Handler {
 			r.Post("/", h.CreateBaseVM)
 			r.Route("/{id}", func(r chi.Router) {
 				r.Post("/root-keys", h.CreateRootKeys)
+				r.Post("/root-keys/install", h.InstallRootKey)
 				r.Get("/root-keys/download", h.DownloadRootKey)
 				r.Post("/disks", h.CreateDisk)
 			})

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -107,7 +109,7 @@ func (v *VBoxService) CreateUserVM(name, osType, diskPath string, ramMB, cpus in
 		"--memory", fmt.Sprint(ramMB),
 		"--cpus", fmt.Sprint(cpus),
 		"--nic1", "nat",
-		"--natpf1", "ssh,tcp,,0,,22", // port forwarding SSH (VirtualBox asigna puerto libre)
+		"--natpf1", "ssh,tcp,,2223,,22", // Volvemos al formato universal ,,2223,,22
 		"--audio", "none",
 	); err != nil {
 		return "", fmt.Errorf("modifyvm: %w", err)
@@ -153,21 +155,63 @@ func (v *VBoxService) GetVMUUID(name string) (string, error) {
 	return "", fmt.Errorf("UUID no encontrado para VM '%s'", name)
 }
 
-// ─── Disk operations ──────────────────────────────────────────────────────────
+// GetVMDiskPath intenta encontrar la ruta del primer disco rígido (HDD) de la VM.
+func (v *VBoxService) GetVMDiskPath(nameOrUUID string) (string, error) {
+	out, err := v.run("showvminfo", nameOrUUID, "--machinereadable")
+	if err != nil {
+		return "", err
+	}
+	
+	lines := strings.Split(out, "\n")
+	var cfgFile string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "CfgFile=") {
+			cfgFile = strings.Trim(strings.SplitN(line, "=", 2)[1], "\" \r\n")
+		}
+	}
+
+	for _, line := range lines {
+		lineLower := strings.ToLower(line)
+		if (strings.Contains(lineLower, ".vdi") || strings.Contains(lineLower, ".vmdk")) {
+			val := ""
+			if parts := strings.SplitN(line, "=", 2); len(parts) == 2 {
+				val = parts[1]
+			}
+			if val != "" {
+				path := strings.Trim(val, "\" \r\n")
+				// Si es una snapshot, intentamos adivinar el base en la misma carpeta del .vbox
+				if strings.Contains(path, "Snapshots") && cfgFile != "" {
+					baseDir := filepath.Dir(cfgFile)
+					vmName := ""
+					for _, l := range lines {
+						if strings.HasPrefix(l, "name=") {
+							vmName = strings.Trim(strings.SplitN(l, "=", 2)[1], "\" \r\n")
+						}
+					}
+					// Intentamos buscar NombreVM.vdi en la carpeta base
+					basePath := filepath.Join(baseDir, vmName+".vdi")
+					if _, err := os.Stat(basePath); err == nil {
+						fmt.Printf("[DEBUG] Snapshot detectada. Usando base: %s\n", basePath)
+						return basePath, nil
+					}
+				}
+				
+				if !strings.Contains(path, "Snapshots") {
+					fmt.Printf("[DEBUG] Disco encontrado: %s\n", path)
+					return path, nil
+				}
+			}
+		}
+	}
+	return "", fmt.Errorf("no se encontró el disco principal (base)")
+}
 
 // CreateMultiattachDisk crea un disco .vdi en modo multiattach.
-// sizeMB es el tamaño del disco.
-func (v *VBoxService) CreateMultiattachDisk(filePath string, sizeMB int) error {
-	_, err := v.run("createmedium", "disk",
-		"--filename", filePath,
-		"--size", fmt.Sprint(sizeMB),
-		"--variant", "Standard",
-	)
-	if err != nil {
-		return err
-	}
-	// Cambiar el tipo a multiattach
-	_, err = v.run("modifymedium", filePath, "--type", "multiattach")
+// Si sourcePath no está vacío, clona ese disco en lugar de crear uno vacío.
+func (v *VBoxService) CreateMultiattachDisk(filePath string) error {
+	// Simplemente cambiamos el tipo del disco original a multiattach
+	// Esto permite que el archivo sea compartido por varias VMs (lectura compartida, escritura diferencial)
+	_, err := v.run("modifymedium", filePath, "--type", "multiattach")
 	return err
 }
 

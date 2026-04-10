@@ -27,12 +27,12 @@ func (r *BaseVMRepo) Create(name, description string) (*models.BaseVM, error) {
 }
 
 func (r *BaseVMRepo) FindByID(id int64) (*models.BaseVM, error) {
-	row := r.db.QueryRow(`SELECT id, name, description, state, has_root_keys, vbox_uuid, created_at, updated_at FROM base_vms WHERE id = ?`, id)
+	row := r.db.QueryRow(`SELECT id, name, description, state, has_root_keys, root_pub_key, vbox_uuid, created_at, updated_at FROM base_vms WHERE id = ?`, id)
 	return scanBaseVM(row)
 }
 
 func (r *BaseVMRepo) FindAll() ([]*models.BaseVM, error) {
-	rows, err := r.db.Query(`SELECT id, name, description, state, has_root_keys, vbox_uuid, created_at, updated_at FROM base_vms ORDER BY created_at DESC`)
+	rows, err := r.db.Query(`SELECT id, name, description, state, has_root_keys, root_pub_key, vbox_uuid, created_at, updated_at FROM base_vms ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -72,11 +72,13 @@ func (r *BaseVMRepo) Delete(id int64) error {
 func scanBaseVM(row *sql.Row) (*models.BaseVM, error) {
 	v := &models.BaseVM{}
 	var vboxUUID sql.NullString
-	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.State, &v.HasRootKeys, &vboxUUID, &v.CreatedAt, &v.UpdatedAt)
+	var pubKey sql.NullString
+	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.State, &v.HasRootKeys, &pubKey, &vboxUUID, &v.CreatedAt, &v.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	v.VBoxUUID = vboxUUID.String
+	v.RootPubKey = pubKey.String
 	return v, nil
 }
 
@@ -85,10 +87,12 @@ func scanBaseVMs(rows *sql.Rows) ([]*models.BaseVM, error) {
 	for rows.Next() {
 		v := &models.BaseVM{}
 		var vboxUUID sql.NullString
-		if err := rows.Scan(&v.ID, &v.Name, &v.Description, &v.State, &v.HasRootKeys, &vboxUUID, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		var pubKey sql.NullString
+		if err := rows.Scan(&v.ID, &v.Name, &v.Description, &v.State, &v.HasRootKeys, &pubKey, &vboxUUID, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			return nil, err
 		}
 		v.VBoxUUID = vboxUUID.String
+		v.RootPubKey = pubKey.String
 		vms = append(vms, v)
 	}
 	return vms, rows.Err()

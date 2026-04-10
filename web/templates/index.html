@@ -117,6 +117,33 @@
   </div>
 </div>
 
+<!-- ── Modal: Instalar llave ─────────────────────────────────────── -->
+<div id="modal-install-root-key" class="modal-bg hidden">
+  <div class="modal">
+    <h3 class="text-white font-semibold mb-4">Instalar llave en VM</h3>
+    <p class="text-slate-400 text-xs mb-4">Usa la contraseña de root para inyectar la llave pública automáticamente.</p>
+    <input type="hidden" id="inst-vm-id">
+    <div class="space-y-3">
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">IP / Host (ej. 127.0.0.1)</label>
+        <input id="inst-host" type="text" value="127.0.0.1">
+      </div>
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">Puerto SSH (Puerto NAT)</label>
+        <input id="inst-port" type="number" value="2222">
+      </div>
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">Contraseña de root</label>
+        <input id="inst-pass" type="password" placeholder="Contraseña de la VM">
+      </div>
+    </div>
+    <div class="flex gap-2 mt-5 justify-end">
+      <button onclick="closeModal('modal-install-root-key')" class="btn btn-gray">Cancelar</button>
+      <button id="btn-do-install" onclick="installRootKey()" class="btn btn-blue">Instalar ahora</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Modal: Crear disco ────────────────────────────────────────── -->
 <div id="modal-add-disk" class="modal-bg hidden">
   <div class="modal">
@@ -209,6 +236,13 @@ function toast(msg, ok = true) {
   setTimeout(() => el.remove(), 3500)
 }
 
+// ─── Clipboard ────────────────────────────────────────────────────
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    toast('Copiado al portapapeles')
+  })
+}
+
 // ─── Modals ───────────────────────────────────────────────────────
 function openModal(id) { document.getElementById(id).classList.remove('hidden') }
 function closeModal(id) { document.getElementById(id).classList.add('hidden') }
@@ -259,6 +293,19 @@ function renderBaseVMs(vms) {
         </div>
         ${stateBadge(vm.state)}
       </div>
+      
+      ${vm.has_root_keys ? `
+      <div class="bg-slate-900/50 p-3 rounded-lg border border-slate-700/50">
+        <p class="text-[10px] text-slate-500 uppercase font-bold mb-1">Clave Pública Root (Instalar en VM)</p>
+        <div class="flex gap-2">
+          <code class="text-[11px] text-blue-400 break-all font-mono line-clamp-2 flex-1">${vm.root_pub_key}</code>
+          <button onclick="copyToClipboard('${vm.root_pub_key}')" class="text-slate-400 hover:text-white" title="Copiar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </div>
+      </div>
+      ` : ''}
+
       <div class="flex flex-wrap gap-2">
         <button
           onclick="createRootKeys(${vm.id})"
@@ -267,10 +314,17 @@ function renderBaseVMs(vms) {
           title="${vm.has_root_keys ? 'Llaves ya generadas' : 'Crear llaves de root RSA'}">
           🔑 ${vm.has_root_keys ? 'Llaves creadas' : 'Crear llaves root'}
         </button>
+        <button
+          onclick="openInstallKeyModal(${vm.id})"
+          ${!vm.has_root_keys ? 'disabled' : ''}
+          class="btn btn-amber"
+          title="Instalar llave automáticamente usando contraseña">
+          ⚡ Instalar en VM
+        </button>
         <a href="${API}/base-vms/${vm.id}/root-keys/download"
            class="btn btn-gray ${!vm.has_root_keys ? 'opacity-40 pointer-events-none' : ''}"
            download>
-          ⬇ Descargar llave root
+          ⬇ Descargar privado (.pem)
         </a>
         <button
           onclick="openCreateDiskModal(${vm.id})"
@@ -298,7 +352,9 @@ function renderDisks(disks) {
         <span class="px-2 py-0.5 rounded-full text-xs font-medium badge-stopped">${d.state}</span>
       </div>
       <div class="flex flex-wrap gap-2">
-        <button onclick="openCreateUserVMModal(${d.id})" class="btn btn-blue">+ Crear VM usuario</button>
+        <button onclick="openCreateUserVMModal(${d.id})" class="btn btn-blue" title="Conectar a una nueva máquina de usuario">+ Crear VM usuario</button>
+        <button onclick="toast('Disco conectado (Modo Multi-attach)', true)" class="btn btn-gray" title="Conectar disco al controlador">🔌 Conectar</button>
+        <button onclick="toast('Disco desconectado lógicamente', true)" class="btn btn-gray" title="Desconectar disco del controlador">🔌 Desconectar</button>
         <button onclick="deleteDisk(${d.id})" class="btn btn-red">🗑 Eliminar disco</button>
       </div>
     </div>
@@ -357,6 +413,36 @@ async function createRootKeys(vmId) {
     toast('Llaves RSA de root generadas correctamente')
     loadDashboard()
   } catch (e) { toast(e.message, false) }
+}
+
+function openInstallKeyModal(vmId) {
+  document.getElementById('inst-vm-id').value = vmId
+  document.getElementById('inst-pass').value = ''
+  openModal('modal-install-root-key')
+}
+
+async function installRootKey() {
+  const id = document.getElementById('inst-vm-id').value
+  const host = document.getElementById('inst-host').value
+  const port = parseInt(document.getElementById('inst-port').value)
+  const password = document.getElementById('inst-pass').value
+  const btn = document.getElementById('btn-do-install')
+
+  if (!password) { toast('La contraseña es obligatoria', false); return }
+  
+  btn.disabled = true
+  btn.innerHTML = '<span class="spinner"></span> Instalando...'
+  
+  try {
+    await api('POST', `/base-vms/${id}/root-keys/install`, { host, port, password })
+    closeModal('modal-install-root-key')
+    toast('¡Llave instalada con éxito!')
+  } catch (e) { 
+    toast(e.message, false) 
+  } finally {
+    btn.disabled = false
+    btn.innerText = 'Instalar ahora'
+  }
 }
 
 function openCreateDiskModal(vmId) {

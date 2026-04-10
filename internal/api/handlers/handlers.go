@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -197,6 +195,38 @@ func (h *Handler) CreateRootKeys(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// InstallRootKey instala la llave pública en la VM usando la contraseña de root.
+func (h *Handler) InstallRootKey(w http.ResponseWriter, r *http.Request) {
+	id, err := paramInt(r, "id")
+	if err != nil {
+		respondErr(w, 400, "ID inválido")
+		return
+	}
+
+	var req struct {
+		Host     string `json:"host"`
+		Port     int    `json:"port"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondErr(w, 400, "JSON inválido")
+		return
+	}
+
+	_, pubKey, err := h.BaseVMRepo.GetRootKeys(id)
+	if err != nil {
+		respondErr(w, 404, "Llaves no encontradas")
+		return
+	}
+
+	if err := h.SSH.InstallPublicKeyWithPassword(req.Host, req.Port, "root", req.Password, pubKey); err != nil {
+		respondErr(w, 500, err.Error())
+		return
+	}
+
+	respond(w, 200, map[string]string{"message": "¡Llave instalada con éxito!"})
+}
+
 // DownloadRootKey descarga la clave privada de root como archivo PEM.
 func (h *Handler) DownloadRootKey(w http.ResponseWriter, r *http.Request) {
 	id, err := paramInt(r, "id")
@@ -253,27 +283,25 @@ func (h *Handler) CreateDisk(w http.ResponseWriter, r *http.Request) {
 		req.SizeMB = 20480 // 20 GB por defecto
 	}
 
-	// Ruta en la carpeta predeterminada de VirtualBox (expandiendo la tilde manualmente para Windows)
-	home, err := os.UserHomeDir()
-	if err != nil {
-		respondErr(w, 500, "No se pudo determinar el directorio del usuario: "+err.Error())
+	// BUSCAMOS EL DISCO DE LA VM BASE (No creamos nada nuevo, usamos el original)
+	sourceDisk, _ := h.VBox.GetVMDiskPath(vm.VBoxUUID)
+	if sourceDisk == "" {
+		sourceDisk, _ = h.VBox.GetVMDiskPath(vm.Name)
+	}
+
+	if sourceDisk == "" {
+		respondErr(w, 404, "No pudimos encontrar el disco rígido de tu VM base. Asegurate de que tenga un disco .vdi conectado en VirtualBox.")
 		return
 	}
 
-	vmDir := filepath.Join(home, "VirtualBox VMs", vm.Name)
-	if err := os.MkdirAll(vmDir, 0755); err != nil {
-		respondErr(w, 500, "Error creando directorio de la VM: "+err.Error())
+	// Ponemos el disco original en modo multiattach (esto es instantáneo y no copia archivos)
+	if err := h.VBox.CreateMultiattachDisk(sourceDisk); err != nil {
+		respondErr(w, 500, "Error configurando disco multiconexión: "+err.Error())
 		return
 	}
 
-	filePath := filepath.Join(vmDir, req.Name+".vdi")
-
-	if err := h.VBox.CreateMultiattachDisk(filePath, req.SizeMB); err != nil {
-		respondErr(w, 500, "Error creando disco en VirtualBox: "+err.Error())
-		return
-	}
-
-	disk, err := h.DiskRepo.Create(vmID, req.Name, filePath)
+	// Registramos este disco en la BD como disponible para crear VMs de usuario
+	disk, err := h.DiskRepo.Create(vmID, req.Name, sourceDisk)
 	if err != nil {
 		respondErr(w, 500, "Error registrando disco en BD: "+err.Error())
 		return
