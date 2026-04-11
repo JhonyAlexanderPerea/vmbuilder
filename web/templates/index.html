@@ -243,7 +243,7 @@
     <p id="del-msg" class="text-slate-400 text-sm mb-4">¿Estás seguro? Esta acción es irreversible.</p>
     <input type="hidden" id="del-id">
     <input type="hidden" id="del-type">
-    <div class="space-y-3">
+    <div id="del-pw-container" class="space-y-3">
       <div>
         <label class="text-slate-400 text-xs mb-1 block">Ingresá la clave de la máquina para confirmar:</label>
         <input id="del-pw" type="password" placeholder="Contraseña de la VM">
@@ -564,6 +564,15 @@ function openDeleteModal(id, type, title, msg) {
   document.getElementById('del-title').innerText = title
   document.getElementById('del-msg').innerText = msg
   document.getElementById('del-pw').value = ''
+  
+  // Mostrar/Ocultar campo de contraseña según el tipo
+  const pwContainer = document.getElementById('del-pw-container')
+  if (type === 'user') {
+    pwContainer.classList.add('hidden')
+  } else {
+    pwContainer.classList.remove('hidden')
+  }
+  
   openModal('modal-confirm-delete')
 }
 
@@ -572,16 +581,17 @@ async function processDeletion() {
   const type = document.getElementById('del-type').value
   const password = document.getElementById('del-pw').value.trim()
   
-  if (!password) { toast('Ingresá la clave de la máquina', false); return }
+  if (type === 'base' && !password) { toast('Ingresá la clave de la máquina', false); return }
 
   const path = type === 'base' ? `/base-vms/${id}` : `/user-vms/${id}`
+  const body = type === 'base' ? { password } : null
   const btn = document.getElementById('btn-confirm-del')
   
   btn.disabled = true
   btn.innerText = 'Eliminando...'
   
   try {
-    await api('DELETE', path, { password })
+    await api('DELETE', path, body)
     closeModal('modal-confirm-delete')
     toast('Eliminado correctamente')
     loadDashboard()

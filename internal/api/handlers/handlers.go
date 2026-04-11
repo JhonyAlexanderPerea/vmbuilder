@@ -559,20 +559,7 @@ func (h *Handler) DeleteUserVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verificar contraseña de borrado
-	var req struct {
-		Password string `json:"password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		fmt.Printf("DEBUG: Error decodificando body DELETE (UserVM): %v\n", err)
-	}
 
-	fmt.Printf("DEBUG: Intento de borrado UserVM ID %d. Recibido: '%s', En BD: '%s'\n", id, req.Password, userVM.DeletionPassword)
-
-	if req.Password == "" || userVM.DeletionPassword != req.Password {
-		respondErr(w, 403, "La contraseña de la máquina es incorrecta")
-		return
-	}
 
 	if userVM.VBoxUUID != "" {
 		_ = h.VBox.PowerOffVM(userVM.VBoxUUID)
