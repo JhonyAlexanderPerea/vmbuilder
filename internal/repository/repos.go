@@ -14,10 +14,10 @@ type BaseVMRepo struct{ db *DB }
 
 func NewBaseVMRepo(db *DB) *BaseVMRepo { return &BaseVMRepo{db} }
 
-func (r *BaseVMRepo) Create(name, description string) (*models.BaseVM, error) {
+func (r *BaseVMRepo) Create(name, description, password string) (*models.BaseVM, error) {
 	res, err := r.db.Exec(
-		`INSERT INTO base_vms (name, description) VALUES (?, ?)`,
-		name, description,
+		`INSERT INTO base_vms (name, description, deletion_password) VALUES (?, ?, ?)`,
+		name, description, password,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("crear base_vm: %w", err)
@@ -27,12 +27,12 @@ func (r *BaseVMRepo) Create(name, description string) (*models.BaseVM, error) {
 }
 
 func (r *BaseVMRepo) FindByID(id int64) (*models.BaseVM, error) {
-	row := r.db.QueryRow(`SELECT id, name, description, state, has_root_keys, root_pub_key, vbox_uuid, created_at, updated_at FROM base_vms WHERE id = ?`, id)
+	row := r.db.QueryRow(`SELECT id, name, description, state, has_root_keys, root_pub_key, vbox_uuid, deletion_password, created_at, updated_at FROM base_vms WHERE id = ?`, id)
 	return scanBaseVM(row)
 }
 
 func (r *BaseVMRepo) FindAll() ([]*models.BaseVM, error) {
-	rows, err := r.db.Query(`SELECT id, name, description, state, has_root_keys, root_pub_key, vbox_uuid, created_at, updated_at FROM base_vms ORDER BY created_at DESC`)
+	rows, err := r.db.Query(`SELECT id, name, description, state, has_root_keys, root_pub_key, vbox_uuid, deletion_password, created_at, updated_at FROM base_vms ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func scanBaseVM(row *sql.Row) (*models.BaseVM, error) {
 	v := &models.BaseVM{}
 	var vboxUUID sql.NullString
 	var pubKey sql.NullString
-	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.State, &v.HasRootKeys, &pubKey, &vboxUUID, &v.CreatedAt, &v.UpdatedAt)
+	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.State, &v.HasRootKeys, &pubKey, &vboxUUID, &v.DeletionPassword, &v.CreatedAt, &v.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func scanBaseVMs(rows *sql.Rows) ([]*models.BaseVM, error) {
 		v := &models.BaseVM{}
 		var vboxUUID sql.NullString
 		var pubKey sql.NullString
-		if err := rows.Scan(&v.ID, &v.Name, &v.Description, &v.State, &v.HasRootKeys, &pubKey, &vboxUUID, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.Name, &v.Description, &v.State, &v.HasRootKeys, &pubKey, &vboxUUID, &v.DeletionPassword, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			return nil, err
 		}
 		v.VBoxUUID = vboxUUID.String
@@ -176,10 +176,10 @@ type UserVMRepo struct{ db *DB }
 
 func NewUserVMRepo(db *DB) *UserVMRepo { return &UserVMRepo{db} }
 
-func (r *UserVMRepo) Create(diskID int64, name, description string) (*models.UserVM, error) {
+func (r *UserVMRepo) Create(diskID int64, name, description, password string) (*models.UserVM, error) {
 	res, err := r.db.Exec(
-		`INSERT INTO user_vms (disk_id, name, description) VALUES (?, ?, ?)`,
-		diskID, name, description,
+		`INSERT INTO user_vms (disk_id, name, description, deletion_password) VALUES (?, ?, ?, ?)`,
+		diskID, name, description, password,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("crear user_vm: %w", err)
@@ -190,7 +190,7 @@ func (r *UserVMRepo) Create(diskID int64, name, description string) (*models.Use
 
 func (r *UserVMRepo) FindByID(id int64) (*models.UserVM, error) {
 	row := r.db.QueryRow(
-		`SELECT id, disk_id, name, description, username, state, has_user_keys, vbox_uuid, ssh_port, created_at, updated_at FROM user_vms WHERE id=?`,
+		`SELECT id, disk_id, name, description, username, state, has_user_keys, vbox_uuid, ssh_port, deletion_password, created_at, updated_at FROM user_vms WHERE id=?`,
 		id,
 	)
 	return scanUserVM(row)
@@ -198,7 +198,7 @@ func (r *UserVMRepo) FindByID(id int64) (*models.UserVM, error) {
 
 func (r *UserVMRepo) FindAll() ([]*models.UserVM, error) {
 	rows, err := r.db.Query(
-		`SELECT id, disk_id, name, description, username, state, has_user_keys, vbox_uuid, ssh_port, created_at, updated_at FROM user_vms ORDER BY created_at DESC`,
+		`SELECT id, disk_id, name, description, username, state, has_user_keys, vbox_uuid, ssh_port, deletion_password, created_at, updated_at FROM user_vms ORDER BY created_at DESC`,
 	)
 	if err != nil {
 		return nil, err
@@ -250,7 +250,7 @@ func scanUserVM(row *sql.Row) (*models.UserVM, error) {
 	var vboxUUID sql.NullString
 	var sshPort sql.NullInt64
 	err := row.Scan(&uv.ID, &uv.DiskID, &uv.Name, &uv.Description, &uv.Username,
-		&uv.State, &uv.HasUserKeys, &vboxUUID, &sshPort, &uv.CreatedAt, &uv.UpdatedAt)
+		&uv.State, &uv.HasUserKeys, &vboxUUID, &sshPort, &uv.DeletionPassword, &uv.CreatedAt, &uv.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +263,7 @@ func scanUserVMRow(rows *sql.Rows) (*models.UserVM, error) {
 	var vboxUUID sql.NullString
 	var sshPort sql.NullInt64
 	err := rows.Scan(&uv.ID, &uv.DiskID, &uv.Name, &uv.Description, &uv.Username,
-		&uv.State, &uv.HasUserKeys, &vboxUUID, &sshPort, &uv.CreatedAt, &uv.UpdatedAt)
+		&uv.State, &uv.HasUserKeys, &vboxUUID, &sshPort, &uv.DeletionPassword, &uv.CreatedAt, &uv.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}

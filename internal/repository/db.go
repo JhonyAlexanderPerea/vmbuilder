@@ -43,6 +43,7 @@ func migrate(db *sql.DB) error {
 		root_priv_key BLOB,               -- PEM de la llave privada de root (cifrado en producción)
 		root_pub_key  TEXT,
 		vbox_uuid     TEXT,
+		deletion_password TEXT NOT NULL DEFAULT '',
 		created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
@@ -68,10 +69,19 @@ func migrate(db *sql.DB) error {
 		user_pub_key  TEXT,
 		vbox_uuid     TEXT,
 		ssh_port      INTEGER,
+		deletion_password TEXT NOT NULL DEFAULT '',
 		created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
 	`
 	_, err := db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migraciones incrementales automáticas (SQLite ignora si ya existe con IF NOT EXISTS, pero ADD COLUMN requiere cuidado)
+	_, _ = db.Exec("ALTER TABLE base_vms ADD COLUMN deletion_password TEXT NOT NULL DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE user_vms ADD COLUMN deletion_password TEXT NOT NULL DEFAULT ''")
+
+	return nil
 }

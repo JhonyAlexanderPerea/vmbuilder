@@ -142,21 +142,65 @@ func (h *Handler) CreateBaseVM(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
+		Password    string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondErr(w, 400, "JSON inválido")
 		return
 	}
-	if req.Name == "" {
-		respondErr(w, 400, "El nombre es obligatorio")
+	if req.Name == "" || req.Password == "" {
+		respondErr(w, 400, "El nombre y la contraseña son obligatorios")
 		return
 	}
-	vm, err := h.BaseVMRepo.Create(req.Name, req.Description)
+	vm, err := h.BaseVMRepo.Create(req.Name, req.Description, req.Password)
 	if err != nil {
 		respondErr(w, 500, "No se pudo crear la VM base: "+err.Error())
 		return
 	}
 	respond(w, 201, vm)
+}
+
+// DeleteBaseVM elimina una VM base y todo lo asociado (discos y clones).
+func (h *Handler) DeleteBaseVM(w http.ResponseWriter, r *http.Request) {
+	id, err := paramInt(r, "id")
+	if err != nil {
+		respondErr(w, 400, "ID inválido")
+		return
+	}
+
+	vm, err := h.BaseVMRepo.FindByID(id)
+	if err != nil {
+		respondErr(w, 404, "VM base no encontrada")
+		return
+	}
+
+	// Verificar contraseña
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fmt.Printf("DEBUG: Error decodificando body DELETE: %v\n", err)
+	}
+
+	fmt.Printf("DEBUG: Intento de borrado BaseVM ID %d. Recibido: '%s', En BD: '%s'\n", id, req.Password, vm.DeletionPassword)
+
+	if req.Password == "" || vm.DeletionPassword != req.Password {
+		respondErr(w, 403, "La contraseña de la máquina es incorrecta")
+		return
+	}
+
+	// Eliminar de VirtualBox si tiene UUID
+	if vm.VBoxUUID != "" {
+		_ = h.VBox.PowerOffVM(vm.VBoxUUID)
+		_ = h.VBox.DeleteVM(vm.VBoxUUID)
+	}
+
+	if err := h.BaseVMRepo.Delete(id); err != nil {
+		respondErr(w, 500, "Error eliminando de BD: "+err.Error())
+		return
+	}
+
+	respond(w, 200, map[string]string{"message": "VM base y recursos asociados eliminados"})
 }
 
 // CreateRootKeys genera el par de llaves RSA para root en la VM base especificada.
@@ -220,7 +264,11 @@ func (h *Handler) InstallRootKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.SSH.InstallPublicKeyWithPassword(req.Host, req.Port, "root", req.Password, pubKey); err != nil {
-		respondErr(w, 500, err.Error())
+		// Logueamos el error real para debugging
+		fmt.Printf("Error instalando llave: %v\n", err)
+		
+		// Respondemos con un mensaje bien resumido y claro para el usuario
+		respondErr(w, http.StatusUnauthorized, "No se pudo conectar. Verifique que la VM esté encendida y que el usuario 'root' admita conexión con contraseña.")
 		return
 	}
 
@@ -294,8 +342,8 @@ func (h *Handler) CreateDisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ponemos el disco original en modo multiattach (esto es instantáneo y no copia archivos)
-	if err := h.VBox.CreateMultiattachDisk(sourceDisk); err != nil {
+	// Ponemos el disco original en modo multiattach (ahora con lógica Ninja anti-bloqueo)
+	if err := h.VBox.CreateMultiattachDisk(vm.Name, sourceDisk); err != nil {
 		respondErr(w, 500, "Error configurando disco multiconexión: "+err.Error())
 		return
 	}
@@ -368,13 +416,14 @@ func (h *Handler) CreateUserVM(w http.ResponseWriter, r *http.Request) {
 		Description string `json:"description"`
 		RamMB       int    `json:"ram_mb"`
 		CPUs        int    `json:"cpus"`
+		Password    string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondErr(w, 400, "JSON inválido")
 		return
 	}
-	if req.Name == "" {
-		respondErr(w, 400, "El nombre es obligatorio")
+	if req.Name == "" || req.Password == "" {
+		respondErr(w, 400, "El nombre y la contraseña son obligatorios")
 		return
 	}
 	if req.RamMB <= 0 {
@@ -398,7 +447,7 @@ func (h *Handler) CreateUserVM(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = baseVM // usado para logging/trazabilidad
 
-	userVM, err := h.UserVMRepo.Create(diskID, req.Name, req.Description)
+	userVM, err := h.UserVMRepo.Create(diskID, req.Name, req.Description, req.Password)
 	if err != nil {
 		respondErr(w, 500, "Error registrando VM en BD: "+err.Error())
 		return
@@ -507,6 +556,21 @@ func (h *Handler) DeleteUserVM(w http.ResponseWriter, r *http.Request) {
 	userVM, err := h.UserVMRepo.FindByID(id)
 	if err != nil {
 		respondErr(w, 404, "VM no encontrada")
+		return
+	}
+
+	// Verificar contraseña de borrado
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fmt.Printf("DEBUG: Error decodificando body DELETE (UserVM): %v\n", err)
+	}
+
+	fmt.Printf("DEBUG: Intento de borrado UserVM ID %d. Recibido: '%s', En BD: '%s'\n", id, req.Password, userVM.DeletionPassword)
+
+	if req.Password == "" || userVM.DeletionPassword != req.Password {
+		respondErr(w, 403, "La contraseña de la máquina es incorrecta")
 		return
 	}
 

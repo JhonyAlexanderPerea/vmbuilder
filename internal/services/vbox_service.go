@@ -208,11 +208,61 @@ func (v *VBoxService) GetVMDiskPath(nameOrUUID string) (string, error) {
 
 // CreateMultiattachDisk crea un disco .vdi en modo multiattach.
 // Si sourcePath no está vacío, clona ese disco en lugar de crear uno vacío.
-func (v *VBoxService) CreateMultiattachDisk(filePath string) error {
-	// Simplemente cambiamos el tipo del disco original a multiattach
-	// Esto permite que el archivo sea compartido por varias VMs (lectura compartida, escritura diferencial)
-	_, err := v.run("modifymedium", filePath, "--type", "multiattach")
-	return err
+func (v *VBoxService) CreateMultiattachDisk(vmName, filePath string) error {
+	// 0. VERIFICACIÓN CRÍTICA: La máquina virtual DEBE estar apagada ("poweroff" o "aborted")
+	state, err := v.VMState(vmName)
+	if err == nil && state == "running" {
+		return fmt.Errorf("la máquina '%s' está encendida. Para configurar el disco multiconexión, primero debés apagar la máquina virtual completamente", vmName)
+	}
+
+	// 1. Intentamos detectar si el disco está conectado para saber cómo volver a conectarlo
+	out, _ := v.run("showvminfo", vmName, "--machinereadable")
+	var controller, port, device string
+	lines := strings.Split(out, "\n")
+	
+	for _, line := range lines {
+		// Buscamos la conexión del hdd. Ej: "SATA-0-0"="C:\..."
+		if strings.Contains(line, filePath) {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) > 0 {
+				key := strings.Trim(parts[0], "\"") // SATA-0-0
+				keyParts := strings.Split(key, "-")
+				if len(keyParts) == 3 {
+					controller = keyParts[0]
+					port = keyParts[1]
+					device = keyParts[2]
+				}
+			}
+		}
+	}
+
+	// 2. Si lo encontramos conectado, lo desconectamos temporalmente (VBox no deja cambiar el modo de un disco atado)
+	if controller != "" {
+		fmt.Printf("[NINJA] Desconectando disco de %s (%s %s:%s)...\n", vmName, controller, port, device)
+		_, _ = v.run("storageattach", vmName, "--storagectl", controller, "--port", port, "--device", device, "--medium", "none")
+	}
+
+	// 3. Cambiamos el modo a multiattach
+	fmt.Printf("[NINJA] Cambiando modo a multiattach...\n")
+	if _, err := v.run("modifymedium", filePath, "--type", "multiattach"); err != nil {
+		// Si falla, intentamos reconectar antes de salir para no dejar la VM rota
+		if controller != "" {
+			_, _ = v.run("storageattach", vmName, "--storagectl", controller, "--port", port, "--device", device, "--type", "hdd", "--medium", filePath)
+		}
+		// Si el error contiene "locked", damos una sugerencia
+		if strings.Contains(err.Error(), "locked") {
+			return fmt.Errorf("el archivo del disco está bloqueado por VirtualBox. Por favor, cerrá la interfaz de VirtualBox o cualquier otra tarea que use la máquina '%s' e intentalo de nuevo", vmName)
+		}
+		return err
+	}
+
+	// 4. Si estaba conectado, lo volvemos a conectar
+	if controller != "" {
+		fmt.Printf("[NINJA] Reconectando disco a %s...\n", vmName)
+		_, _ = v.run("storageattach", vmName, "--storagectl", controller, "--port", port, "--device", device, "--type", "hdd", "--medium", filePath)
+	}
+
+	return nil
 }
 
 // DetachDisk desconecta un disco de una VM.

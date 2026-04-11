@@ -39,6 +39,8 @@
 </head>
 <body class="min-h-screen p-6">
 
+<div class="max-w-[70%] mx-auto">
+
 <!-- Header -->
 <header class="flex items-center justify-between mb-8">
   <div>
@@ -96,6 +98,8 @@
 
 </div>
 
+</div>
+
 <!-- ── Modal: Agregar VM base ───────────────────────────────────── -->
 <div id="modal-add-base-vm" class="modal-bg hidden">
   <div class="modal">
@@ -108,6 +112,10 @@
       <div>
         <label class="text-slate-400 text-xs mb-1 block">Descripción</label>
         <textarea id="bvm-desc" rows="2" placeholder="Descripción opcional"></textarea>
+      </div>
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">Clave de la máquina (para seguridad) *</label>
+        <input id="bvm-pw" type="password" placeholder="Establecé una clave para tu VM base">
       </div>
     </div>
     <div class="flex gap-2 mt-5 justify-end">
@@ -190,6 +198,10 @@
           <input id="uvm-cpus" type="number" value="1" min="1" max="4">
         </div>
       </div>
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">Clave de la máquina (para seguridad) *</label>
+        <input id="uvm-pw" type="password" placeholder="Establecé una clave para tu VM">
+      </div>
     </div>
     <div class="flex gap-2 mt-5 justify-end">
       <button onclick="closeModal('modal-add-user-vm')" class="btn btn-gray">Cancelar</button>
@@ -220,6 +232,26 @@
     <div class="flex gap-2 mt-5 justify-end">
       <button onclick="closeModal('modal-create-user')" class="btn btn-gray">Cancelar</button>
       <button onclick="createUserAccount()" class="btn btn-green">Crear usuario</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Confirmar eliminación ──────────────────────────────── -->
+<div id="modal-confirm-delete" class="modal-bg hidden">
+  <div class="modal border-red-500/30">
+    <h3 id="del-title" class="text-white font-semibold mb-2">Eliminar Recurso</h3>
+    <p id="del-msg" class="text-slate-400 text-sm mb-4">¿Estás seguro? Esta acción es irreversible.</p>
+    <input type="hidden" id="del-id">
+    <input type="hidden" id="del-type">
+    <div class="space-y-3">
+      <div>
+        <label class="text-slate-400 text-xs mb-1 block">Ingresá la clave de la máquina para confirmar:</label>
+        <input id="del-pw" type="password" placeholder="Contraseña de la VM">
+      </div>
+    </div>
+    <div class="flex gap-2 mt-6 justify-end">
+      <button onclick="closeModal('modal-confirm-delete')" class="btn btn-gray">Cancelar</button>
+      <button id="btn-confirm-del" onclick="processDeletion()" class="btn btn-red">Eliminar permanentemente</button>
     </div>
   </div>
 </div>
@@ -333,6 +365,12 @@ function renderBaseVMs(vms) {
           title="${!vm.has_root_keys ? 'Requiere llaves de root' : 'Crear disco multiconexión'}">
           💾 Crear disco
         </button>
+        <button
+          onclick="deleteBaseVM(${vm.id})"
+          class="btn btn-red"
+          title="Eliminar VM Base y todo lo asociado">
+          🗑 Eliminar Base
+        </button>
       </div>
     </div>
   `).join('')
@@ -398,9 +436,10 @@ function renderUserVMs(vms) {
 async function createBaseVM() {
   const name = document.getElementById('bvm-name').value.trim()
   const description = document.getElementById('bvm-desc').value.trim()
-  if (!name) { toast('El nombre es obligatorio', false); return }
+  const password = document.getElementById('bvm-pw').value.trim()
+  if (!name || !password) { toast('El nombre y la clave son obligatorios', false); return }
   try {
-    await api('POST', '/base-vms', { name, description })
+    await api('POST', '/base-vms', { name, description, password })
     closeModal('modal-add-base-vm')
     toast('VM base creada correctamente')
     loadDashboard()
@@ -486,9 +525,10 @@ async function createUserVM() {
   const description = document.getElementById('uvm-desc').value.trim()
   const ram_mb = parseInt(document.getElementById('uvm-ram').value) || 1024
   const cpus = parseInt(document.getElementById('uvm-cpus').value) || 1
-  if (!name) { toast('El nombre es obligatorio', false); return }
+  const password = document.getElementById('uvm-pw').value.trim()
+  if (!name || !password) { toast('El nombre y la contraseña son obligatorios', false); return }
   try {
-    await api('POST', `/disks/${diskId}/user-vms`, { name, description, ram_mb, cpus })
+    await api('POST', `/disks/${diskId}/user-vms`, { name, description, ram_mb, cpus, password })
     closeModal('modal-add-user-vm')
     toast('VM de usuario creada')
     loadDashboard()
@@ -516,13 +556,49 @@ async function createUserAccount() {
   } catch (e) { toast(e.message, false) }
 }
 
-async function deleteUserVM(id) {
-  if (!confirm('¿Eliminar esta VM de usuario?')) return
+// ─── Deletion Logic ──────────────────────────────────────────────
+
+function openDeleteModal(id, type, title, msg) {
+  document.getElementById('del-id').value = id
+  document.getElementById('del-type').value = type
+  document.getElementById('del-title').innerText = title
+  document.getElementById('del-msg').innerText = msg
+  document.getElementById('del-pw').value = ''
+  openModal('modal-confirm-delete')
+}
+
+async function processDeletion() {
+  const id = document.getElementById('del-id').value
+  const type = document.getElementById('del-type').value
+  const password = document.getElementById('del-pw').value.trim()
+  
+  if (!password) { toast('Ingresá la clave de la máquina', false); return }
+
+  const path = type === 'base' ? `/base-vms/${id}` : `/user-vms/${id}`
+  const btn = document.getElementById('btn-confirm-del')
+  
+  btn.disabled = true
+  btn.innerText = 'Eliminando...'
+  
   try {
-    await api('DELETE', `/user-vms/${id}`)
-    toast('VM eliminada')
+    await api('DELETE', path, { password })
+    closeModal('modal-confirm-delete')
+    toast('Eliminado correctamente')
     loadDashboard()
-  } catch (e) { toast(e.message, false) }
+  } catch (e) {
+    toast(e.message, false)
+  } finally {
+    btn.disabled = false
+    btn.innerText = 'Eliminar permanentemente'
+  }
+}
+
+function deleteBaseVM(id) {
+  openDeleteModal(id, 'base', 'Eliminar VM Base', '¿Estás seguro de eliminar esta VM Base? Esto borrará también TODOS los discos y clones asociados.')
+}
+
+function deleteUserVM(id) {
+  openDeleteModal(id, 'user', 'Eliminar VM de Usuario', '¿Estás seguro de querer eliminar tu instancia? Esta acción no se puede deshacer.')
 }
 
 // ─── Init ─────────────────────────────────────────────────────────

@@ -49,6 +49,7 @@ func NewRouter(db *repository.DB) http.Handler {
 				r.Post("/root-keys/install", h.InstallRootKey)
 				r.Get("/root-keys/download", h.DownloadRootKey)
 				r.Post("/disks", h.CreateDisk)
+				r.Delete("/", h.DeleteBaseVM)
 			})
 		})
 

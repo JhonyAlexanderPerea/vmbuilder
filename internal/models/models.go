@@ -25,15 +25,16 @@ const (
 // ─── BaseVM ───────────────────────────────────────────────────────────────────
 
 type BaseVM struct {
-	ID          int64     `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	State       VMState   `json:"state"`
-	HasRootKeys bool      `json:"has_root_keys"`   // llaves RSA de root generadas
-	RootPubKey  string    `json:"root_pub_key"`    // clave pública para copiar a la VM
-	VBoxUUID    string    `json:"vbox_uuid"`        // UUID asignado por VirtualBox
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID               int64     `json:"id"`
+	Name             string    `json:"name"`
+	Description      string    `json:"description"`
+	State            VMState   `json:"state"`
+	HasRootKeys      bool      `json:"has_root_keys"`
+	RootPubKey       string    `json:"root_pub_key"`
+	VBoxUUID         string    `json:"vbox_uuid"`
+	DeletionPassword string    `json:"-"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // ─── Disk (multiconexión) ─────────────────────────────────────────────────────
@@ -57,9 +58,10 @@ type UserVM struct {
 	Username    string    `json:"username"`     // usuario creado en el SO
 	State       VMState   `json:"state"`
 	HasUserKeys bool      `json:"has_user_keys"`
-	VBoxUUID    string    `json:"vbox_uuid"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	VBoxUUID         string    `json:"vbox_uuid"`
+	DeletionPassword string    `json:"-"` // Contraseña requerida para eliminación
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // ─── SSHKeyPair ───────────────────────────────────────────────────────────────
